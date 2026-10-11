@@ -20,13 +20,14 @@ import commondir from './utils/commondir';
 import {
 	errCannotAssignModuleToChunk,
 	errChunkInvalid,
+	errFileNameOutsideOutputDirectory,
 	errInvalidOption,
 	error,
 	warnDeprecation
 } from './utils/error';
 import { sortByExecutionOrder } from './utils/executionOrder';
 import { type GenerateCodeSnippets, getGenerateCodeSnippets } from './utils/generateCodeSnippets';
-import { basename, isAbsolute } from './utils/path';
+import { basename, isAbsolute, join } from './utils/path';
 import { timeEnd, timeStart } from './utils/timers';
 
 export default class Bundle {
@@ -76,6 +77,7 @@ export default class Bundle {
 			isWrite
 		]);
 		this.finaliseAssets(outputBundle);
+		validateOutputBundleFileNames(outputBundle);
 
 		timeEnd('GENERATE', 1);
 		return outputBundle as OutputBundle;
@@ -330,4 +332,30 @@ function addModuleToManualChunk(
 		return error(errCannotAssignModuleToChunk(module.id, alias, existingAlias));
 	}
 	manualChunkAliasByEntry.set(module, alias);
+}
+
+function isFileNameOutsideOutputDirectory(fileName: string): boolean {
+	// Use join() to normalize ".." segments, then replace backslashes so the
+	// string checks below work identically on Windows and POSIX.
+	const normalized = join(fileName).replace(/\\/g, '/');
+	return (
+		normalized === '..' ||
+		normalized.startsWith('../') ||
+		normalized === '.' ||
+		isAbsolute(normalized)
+	);
+}
+
+function validateOutputBundleFileNames(bundle: OutputBundleWithPlaceholders): void {
+	for (const [bundleKey, entry] of Object.entries(bundle)) {
+		if (isFileNameOutsideOutputDirectory(bundleKey)) {
+			return error(errFileNameOutsideOutputDirectory(bundleKey));
+		}
+		if (entry.type !== 'placeholder') {
+			const { fileName } = entry;
+			if (fileName !== bundleKey && isFileNameOutsideOutputDirectory(fileName)) {
+				return error(errFileNameOutsideOutputDirectory(fileName));
+			}
+		}
+	}
 }
